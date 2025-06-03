@@ -5,7 +5,6 @@ from plotly.subplots import make_subplots
 from dash import Dash, html, Input, Output, ctx, no_update, State, dash, dcc
 from dash.dcc import send_data_frame
 from dash.exceptions import PreventUpdate
-from dash import callback_context
 from flask import Flask, session, redirect, url_for, request
 from flask_caching import Cache
 import pandas as pd
@@ -19,20 +18,21 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from os import environ
+from os import path
 import textwrap
 from pandas import DataFrame, concat
 import os
 import datetime
 import threading
 import numpy as np
-from scipy.stats import norm
+import scipy.stats as st
 import orjson
 from pathlib import Path
 import re
 from functools import wraps
+import json
 
 load_dotenv()  # load environment variables from .env
-
 patch_yf()  # Apply the patch
 
 server = Flask(__name__)
@@ -78,11 +78,11 @@ app.layout = html.Div([
     Input('url', 'pathname')
 )
 def display_page(pathname):
-    if pathname == '/polygon-options':
+    if pathname == '/polygon_options':
         return serve_polygon_layout()
-    elif pathname == '/options-flow':
+    elif pathname == '/options_flow':
         return serve_options_flow_layout()
-    elif pathname == '/market-analysis':
+    elif pathname == '/market_analysis':
         return serve_market_analysis_layout()
     else:
         return serve_layout()
@@ -153,15 +153,8 @@ def check_for_retry():
         sensor(select=tickers)
 
 
-# respond to prompt if env variable not set
-response = environ.get("AUTO_RESPONSE")
-if not response:
-    response = "y"  # Automatically download data
-if response.strip().lower() == "y":  # download data at start
-    print("\nDownloading initial data...\n")
-    sensor()
-else:
-    print("\nUsing existing data...\n")
+
+
 
 # schedule when to redownload data
 sched = BackgroundScheduler(daemon=True)
@@ -879,20 +872,7 @@ def handle_help_menu(about_clicks, docs_clicks, support_clicks):
             html.H4("About G|Flows"),
             html.P("G|Flows is a powerful options flow analysis tool that helps traders track and analyze options market activity."),
             html.P("Version: 1.0.0"),
-        ])
-    elif button_id == "docs-menu":
-        return html.Div([
-            html.H4("Documentation"),
-            html.P("For detailed documentation, please visit our GitHub repository."),
-            html.A("View Documentation", href="https://github.com/yourusername/gflows", target="_blank"),
-        ])
-    elif button_id == "support-menu":
-        return html.Div([
-            html.H4("Support"),
-            html.P("Need help? Contact us:"),
-            html.P("Email: support@gflows.com"),
-            html.P("Discord: discord.gg/gflows"),
-        ])
+      
     
     raise PreventUpdate
 
@@ -990,17 +970,7 @@ def toggle_help_modal(about_clicks, docs_clicks, support_clicks, close_clicks, i
             html.P("G|Flows is a powerful options flow analysis tool that helps traders track and analyze options market activity."),
             html.P("Version: 1.0.0"),
         ])
-    elif button_id == "docs-menu":
-        return True, "Documentation", html.Div([
-            html.P("For detailed documentation, please visit our GitHub repository."),
-            html.A("View Documentation", href="https://github.com/yourusername/gflows", target="_blank"),
-        ])
-    elif button_id == "support-menu":
-        return True, "Support", html.Div([
-            html.P("Need help? Contact us:"),
-            html.P("Email: support@gflows.com"),
-            html.P("Discord: discord.gg/gflows"),
-        ])
+   
     
     raise PreventUpdate
 
@@ -1016,19 +986,7 @@ def update_polygon_table(n_intervals):
         return html.Div("No data available")
     
     try:
-        df = pd.read_csv(output_path)
-        if df.empty:
-            return html.Div("No data available")
-        
-        # Add PREMIUM column: PREMIUM = PRICE * volume * 100
-        price_col = next((col for col in ['close', 'last_price', 'price', 'underlying_price'] if col in df.columns), None)
-        if price_col is not None and 'volume' in df.columns:
-            df['PREMIUM'] = (df[price_col] * df['volume'] * 100).round(2)
-        
-        # Convert last_trade_time from nanoseconds to datetime
-        if 'last_trade_time' in df.columns:
-            df['last_trade_time'] = pd.to_datetime(df['last_trade_time'], unit='ns').dt.strftime('%Y-%m-%d %H:%M:%S')
-        
+      
         # Extract base symbol from ticker if needed
         if 'ticker' in df.columns:
             df['ticker'] = df['ticker'].apply(lambda x: x.split(':')[1].split('2')[0] if isinstance(x, str) and x.startswith('O:') else x)
@@ -1068,55 +1026,138 @@ def update_polygon_table(n_intervals):
 
 @app.callback(
     Output('flow-table', 'children'),
-    [Input('flow-interval', 'n_intervals')],
+    [
+        Input('flow-interval', 'n_intervals'),
+        Input('asset-type-dropdown', 'value'),
+        Input('ticker-filter', 'value'),
+        Input('premium-filter', 'value'),
+        Input('quantity-filter', 'value'),
+        Input('volume-filter', 'value'),
+    ],
     prevent_initial_call=True
 )
-def update_flow_table(n_intervals):
-    output_path = r"C:/Users/pc/Downloads/gflows-main(1)/gflows-main/data/csv/options_flow_data.csv"
-    if not os.path.exists(output_path):
+def update_flow_table(n_intervals, asset_type, ticker_filter, premium_filter, quantity_filter, volume_filter):
+    # Determine which JSON file to read based on the selected asset type
+    json_path = None
+    if asset_type == 'indices':
+        json_path = r"C:/Users/pc/Downloads/gflows-main(1)/gflows-main/data/json"
+    elif asset_type == 'etfs':
+        json_path = r"C:/Users/pc/Downloads/gflows-main(1)/gflows-main/data/json"
+    # Add conditions for 'stocks' or other types if needed in the future
+
+    if json_path is None or not os.path.exists(json_path):
         return html.Div("No data available")
     
     try:
-        df = pd.read_csv(output_path)
-        if df.empty:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        if not data:
             return html.Div("No data available")
-
-        # Fill NaN values with 'N/A'
-        df.fillna("N/A", inplace=True)
-
-        # Process numeric columns
-        df['underlying_price'] = pd.to_numeric(df['underlying_price'], errors='coerce')
-        df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
-        df['premium'] = (df['underlying_price'] * df['volume'] * 100).round(2)
-        
-        # Convert last_trade_time from nanoseconds to datetime
-        if 'last_trade_time' in df.columns:
-            df['last_trade_time'] = pd.to_datetime(df['last_trade_time'], unit='ns').dt.strftime('%Y-%m-%d %H:%M:%S')
-
+        import pandas as pd
+        df = pd.DataFrame(data)
+        # Apply filters only if input is not None or empty
+        if ticker_filter:
+            df = df[df['Ticker'].str.contains(ticker_filter, case=False, na=False)]
+        if premium_filter is not None and premium_filter != '':
+            try:
+                premium_filter_float = float(premium_filter)
+                # Remove '$' and ',' from 'Premium' column before filtering
+                df['Premium_numeric'] = df['Premium'].astype(str).str.replace('$','').str.replace(',','').astype(float)
+                df = df[df['Premium_numeric'] >= premium_filter_float]
+                df = df.drop(columns=['Premium_numeric'])
+            except ValueError:
+                pass # Ignore invalid premium filter input
+        if quantity_filter is not None and quantity_filter != '':
+            try:
+                quantity_filter_int = int(quantity_filter)
+                # Remove ',' from 'Quantity' column before filtering
+                df['Quantity_numeric'] = df['Quantity'].astype(str).str.replace(',','').astype(int)
+                df = df[df['Quantity_numeric'] >= quantity_filter_int]
+                df = df.drop(columns=['Quantity_numeric'])
+            except ValueError:
+                pass # Ignore invalid quantity filter input
+        if volume_filter is not None and volume_filter != '':
+            try:
+                volume_filter_int = int(volume_filter)
+                # Remove ',' from 'Volume' column before filtering
+                df['Volume_numeric'] = df['Volume'].astype(str).str.replace(',','').astype(int)
+                df = df[df['Volume_numeric'] >= volume_filter_int]
+                df = df.drop(columns=['Volume_numeric'])
+            except ValueError:
+                pass # Ignore invalid volume filter input
+        # Columns to display (in order)
         display_cols = [
-            'ticker', 'contract_type', 'strike_price', 'expiration_date',
-            'days_to_expiration', 'volume', 'open_interest', 'volume_oi_ratio',
-            'moneyness', 'underlying_price', 'premium', 'last_trade_time',
-            'bid_size', 'ask_size'
+            ('Timestamp', 'Timestamp'),
+            ('Ticker', 'Ticker'),
+            ('Contract', 'Contract'),
+            ('Premium', 'Premium'),
+            ('Price', 'Price'),
+            ('Quantity', 'Quantity'),
+            ('Volume', 'Volume'),
+            ('Open Interest', 'Open Interest'),
+            ('Side', 'Side'),
+            ('Days to Exp', 'Days to Exp'),
         ]
-
-        def safe_display(val):
-            return val if val not in [0, 0.0, '0', None, 'None', '', 'N/A'] else 'N/A'
-
-        header = html.Thead(html.Tr([html.Th(col.replace('_', ' ').title()) for col in display_cols]))
+        def safe_display(val, col):
+            if col == 'Contract':
+                val_str = str(val)
+                parts = val_str.split()
+                if len(parts) == 3:
+                    strike, contract_type, expiry_date = parts
+                    type_style = {}
+                    if contract_type.upper() == 'CALL':
+                        type_style = {'color': 'limegreen', 'fontWeight': 'bold'}
+                    elif contract_type.upper() == 'PUT':
+                        type_style = {'color': 'red', 'fontWeight': 'bold'}
+                    return html.Div([
+                        html.Span(f"{strike} "),
+                        html.Span(f"{contract_type}", style=type_style),
+                        html.Span(f" {expiry_date}")
+                    ])
+                return val_str # return original string if parsing fails
+            if col in ['Premium']:
+                try:
+                    v = str(val).replace('$','').replace(',','')
+                    return f"{float(v):,.0f}" if v not in [None, '', 'N/A'] else 'N/A'
+                except:
+                    return val
+            if col in ['Price']:
+                try:
+                    return f"{float(val):,.2f}" if val not in [None, '', 'N/A'] else 'N/A'
+                except:
+                    return val
+            if col in ['Quantity', 'Volume', 'Open Interest', 'Days to Exp']:
+                try:
+                    return f"{int(float(val))}" if val not in [None, '', 'N/A'] else 'N/A'
+                except:
+                    return val
+            return val if val not in [None, '', 'N/A'] else 'N/A'
+        def get_cell_style(col, value):
+            base_style = {
+                'padding': '8px',
+                'textAlign': 'right' if col in ['Premium','Price','Quantity','Volume','Open Interest','Days to Exp'] else 'left',
+                'fontWeight': 500 if col == 'Side' else 400,
+                'borderBottom': 'none' # Remove bottom border for cells
+            }
+            
+            
+        
+        header = html.Thead(html.Tr([
+            html.Th(label, style={'textAlign': 'center'}) for _, label in display_cols
+        ]))
         body = html.Tbody([
-            html.Tr([
-                html.Td(
-                    safe_display(df.iloc[i][col]),
-                    style={
-                        'color': 'green' if col == 'contract_type' and str(df.iloc[i][col]).lower() == 'call'
-                        else 'red' if col == 'contract_type' and str(df.iloc[i][col]).lower() == 'put'
-                        else 'red' if col == 'bid_size'
-                        else 'green' if col == 'ask_size'
-                        else ''
-                    }
-                ) for col in display_cols
-            ]) for i in range(len(df))
+            html.Tr(
+                [
+                    html.Td(
+                        safe_display(df.iloc[i][col], label),
+                        style={
+                            **get_cell_style(label, df.iloc[i][col]),
+                            'backgroundColor': '#23272b' if i % 2 == 0 else '#3f3d3d' # Alternating row color
+                        }
+                    ) for col, label in display_cols
+                ],
+                style={'borderBottom': 'none'} # Ensure no border on the row itself
+            ) for i in range(len(df))
         ])
         return [header, body]
     except Exception as e:
@@ -1125,55 +1166,143 @@ def update_flow_table(n_intervals):
 
 @app.callback(
     Output('analysis-table', 'children'),
-    [Input('analysis-interval', 'n_intervals')],
+    [
+        Input('analysis-interval', 'n_intervals'),
+        Input('analysis-ticker-filter', 'value'),
+        Input('analysis-premium-filter', 'value'),
+        Input('analysis-quantity-filter', 'value'),
+        Input('analysis-volume-filter', 'value'),
+    ],
     prevent_initial_call=True
 )
-def update_analysis_table(n_intervals):
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "market_analysis")
-    output_path = os.path.join(data_dir, "market_analysis_data.csv")
-    if not os.path.exists(output_path):
+def update_analysis_table(n_intervals, ticker_filter, premium_filter, quantity_filter, volume_filter):
+    json_path = r"C:/Users/pc/Downloads/gflows-main(1)/gflows-main/data/json/market_analysis_data.json"
+    if not os.path.exists(json_path):
         return html.Div("No data available")
     
     try:
-        df = pd.read_csv(output_path)
-        if df.empty:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        if not data:
             return html.Div("No data available")
+        import pandas as pd
+        df = pd.DataFrame(data)
         
-        # Calculate Premium
-        df['premium'] = (df['underlying_price'] * df['volume'] * 100).round(2)
+        # Apply filters only if input is not None or empty
+        if ticker_filter:
+            df = df[df['Ticker'].str.contains(ticker_filter, case=False, na=False)]
+        if premium_filter is not None and premium_filter != '':
+            try:
+                premium_filter_float = float(premium_filter)
+                # Remove '$' and ',' from 'Premium' column before filtering
+                df['Premium_numeric'] = df['Premium'].astype(str).str.replace('$','').str.replace(',','').astype(float)
+                df = df[df['Premium_numeric'] >= premium_filter_float]
+                df = df.drop(columns=['Premium_numeric'])
+            except ValueError:
+                pass # Ignore invalid premium filter input
+        if quantity_filter is not None and quantity_filter != '':
+            try:
+                quantity_filter_int = int(quantity_filter)
+                # Remove ',' from 'Quantity' column before filtering
+                df['Quantity_numeric'] = df['Quantity'].astype(str).str.replace(',','').astype(int)
+                df = df[df['Quantity_numeric'] >= quantity_filter_int]
+                df = df.drop(columns=['Quantity_numeric'])
+            except ValueError:
+                pass # Ignore invalid quantity filter input
+        if volume_filter is not None and volume_filter != '':
+            try:
+                volume_filter_int = int(volume_filter)
+                # Remove ',' from 'Volume' column before filtering
+                df['Volume_numeric'] = df['Volume'].astype(str).str.replace(',','').astype(int)
+                df = df[df['Volume_numeric'] >= volume_filter_int]
+                df = df.drop(columns=['Volume_numeric'])
+            except ValueError:
+                pass # Ignore invalid volume filter input
         
-        # Display all relevant columns
+        # Columns to display (in order)
         display_cols = [
-            'ticker', 'contract_type', 'strike_price', 'expiration_date',
-            'days_to_expiration', 'volume', 'open_interest', 'volume_oi_ratio',
-            'moneyness', 'underlying_price', 'premium', 'last_trade_time', 'bid_size', 'ask_size'
+            ('Timestamp', 'Timestamp'),
+            ('Ticker', 'Ticker'),
+            ('Contract', 'Contract'),
+            ('Premium', 'Premium'),
+            ('Price', 'Price'),
+            ('Quantity', 'Quantity'),
+            ('Volume', 'Volume'),
+            ('Open Interest', 'Open Interest'),
+            ('Side', 'Side'),
+            ('Days to Exp', 'Days to Exp'),
         ]
         
-        # Format numeric columns
-        numeric_cols = ['moneyness', 'volume_oi_ratio', 'underlying_price']
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').round(2)
+        def safe_display(val, col):
+            if col == 'Contract':
+                val_str = str(val)
+                parts = val_str.split()
+                if len(parts) == 3:
+                    strike, contract_type, expiry_date = parts
+                    type_style = {}
+                    if contract_type.upper() == 'CALL':
+                        type_style = {'color': 'limegreen', 'fontWeight': 'bold'}
+                    elif contract_type.upper() == 'PUT':
+                        type_style = {'color': 'red', 'fontWeight': 'bold'}
+                    return html.Div([
+                        html.Span(f"{strike} "),
+                        html.Span(f"{contract_type}", style=type_style),
+                        html.Span(f" {expiry_date}")
+                    ])
+                return val_str # return original string if parsing fails
+            if col in ['Premium']:
+                try:
+                    v = str(val).replace('$','').replace(',','')
+                    return f"{float(v):,.0f}" if v not in [None, '', 'N/A'] else 'N/A'
+                except:
+                    return val
+            if col in ['Price']:
+                try:
+                    return f"{float(val):,.2f}" if val not in [None, '', 'N/A'] else 'N/A'
+                except:
+                    return val
+            if col in ['Quantity', 'Volume', 'Open Interest', 'Days to Exp']:
+                try:
+                    return f"{int(float(val))}" if val not in [None, '', 'N/A'] else 'N/A'
+                except:
+                    return val
+            return val if val not in [None, '', 'N/A'] else 'N/A'
         
-        # Convert last_trade_time from nanoseconds to datetime
-        if 'last_trade_time' in df.columns:
-            df['last_trade_time'] = pd.to_datetime(df['last_trade_time'], unit='ns').dt.strftime('%Y-%m-%d %H:%M:%S')
+        def get_cell_style(col, value):
+            base_style = {
+                'padding': '8px',
+                'textAlign': 'right' if col in ['Premium','Price','Quantity','Volume','Open Interest','Days to Exp'] else 'left',
+                'fontWeight': 500 if col == 'Side' else 400,
+                'borderBottom': 'none' # Remove bottom border for cells
+            }
+            if col == 'Side':
+                v = str(value).lower()
+                if 'buyer' in v:
+                    return {**base_style, 'color': 'limegreen'}
+                elif 'seller' in v:
+                    return {**base_style, 'color': 'red'}
+                elif 'ask' in v:
+                    return {**base_style, 'color': 'limegreen'}
+                elif 'bid' in v:
+                    return {**base_style, 'color': 'red'}
+            return base_style
         
-        header = html.Thead(html.Tr([html.Th(col.replace('_', ' ').title()) for col in display_cols]))
+        header = html.Thead(html.Tr([
+            html.Th(label, style={'textAlign': 'center'}) for _, label in display_cols
+        ]))
         body = html.Tbody([
-            html.Tr([
-                html.Td(
-                    str(df.iloc[i][col]),
-                    style={
-                        'color': 'green' if col == 'contract_type' and str(df.iloc[i][col]).lower() == 'call'
-                        else 'red' if col == 'contract_type' and str(df.iloc[i][col]).lower() == 'put'
-                        else 'red' if col == 'bid_size'
-                        else 'green' if col == 'ask_size'
-                        else '',
-                        'fontSize': '0.8rem'
-                    }
-                ) for col in display_cols
-            ]) for i in range(len(df))
+            html.Tr(
+                [
+                    html.Td(
+                        safe_display(df.iloc[i][col], label),
+                        style={
+                            **get_cell_style(label, df.iloc[i][col]),
+                            'backgroundColor': '#23272b' if i % 2 == 0 else '#3f3d3d' # Alternating row color
+                        }
+                    ) for col, label in display_cols
+                ],
+                style={'borderBottom': 'none'} # Ensure no border on the row itself
+            ) for i in range(len(df))
         ])
         return [header, body]
     except Exception as e:
@@ -1202,13 +1331,13 @@ def update_polygon_last_updated(n_intervals):
     prevent_initial_call=True
 )
 def update_analysis_last_updated(n_intervals):
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "market_analysis")
-    output_path = os.path.join(data_dir, "market_analysis_data.csv")
+    output_path = r"C:/Users/pc/Downloads/gflows-main(1)/gflows-main/data/json/market_analysis_data.json"
     if not os.path.exists(output_path):
         return "Last updated: N/A"
     mtime = os.path.getmtime(output_path)
     dt = datetime.datetime.fromtimestamp(mtime)
-    formatted = dt.strftime('%b %d, %-I:%M:%S %p ET')
+    # Format as: Feb 10, 4:15:50 PM ET
+    formatted = dt.strftime('%b %d, %I:%M:%S %p ET').lstrip('0')
     return f"Last updated: {formatted}"
 
 
