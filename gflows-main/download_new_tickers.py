@@ -8,4 +8,4 @@ while True:
     print("Fetching data for:", new_tickers)
     dwn_data(select=new_tickers, is_json=True)
     print("Data fetch complete. Waiting 5 minutes...")
-    time.sleep(300)  # 5 minutes 
+    time.sleep(300)  # 5 minutes
