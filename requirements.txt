@@ -1,0 +1,89 @@
+# G|Flows Frontend - Node.js Requirements
+# This file lists the Node.js and npm requirements for the project
+
+# Node.js version requirement
+# Minimum: Node.js 18.0.0
+# Recommended: Node.js 18.17.0 or later (LTS)
+
+# npm version requirement  
+# Minimum: npm 9.0.0
+# Recommended: npm 9.8.0 or later
+
+# System Requirements:
+# - Operating System: Windows 10+, macOS 10.15+, or Linux (Ubuntu 18.04+)
+# - RAM: Minimum 4GB, Recommended 8GB+
+# - Disk Space: 500MB for dependencies, 1GB recommended
+# - Internet connection for package installation
+
+# Development Tools (Optional but recommended):
+# - Git 2.30.0+
+# - VS Code or similar editor
+# - Chrome/Firefox for testing
+
+# Production Requirements:
+# - Node.js 18.0.0+ (for server deployment)
+# - 512MB RAM minimum for production server
+# - SSL certificate for HTTPS (recommended)
+
+# Package Manager Alternatives:
+# You can use any of these package managers:
+# - npm (default, comes with Node.js)
+# - yarn 1.22.0+
+# - pnpm 7.0.0+
+
+# Installation Commands:
+# npm install          # Install all dependencies
+# npm run dev          # Start development server
+# npm run build        # Build for production
+# npm run start        # Start production server
+
+# Environment Variables Required:
+# NEXT_PUBLIC_API_URL  # API base URL (optional, defaults to relative URLs)
+# NODE_ENV             # Environment (development/production)
+
+# Browser Support:
+# - Chrome 90+
+# - Firefox 88+
+# - Safari 14+
+# - Edge 90+
+
+# Dependencies are managed in package.json
+# Run 'npm install' to install all required packages
+
+# Required Python packages
+polygon-api-client>=1.12.3
+pandas>=2.0.0
+requests>=2.0.0
+orjson>=3.8.0
+exchange_calendars>=4.0.0
+numba>=0.56.0
+scipy>=1.10.0
+yfinance>=0.2.0
+dateparser>=1.1.0
+cachetools>=5.0.0
+
+# Instructions to run the code:
+# 1. Install the required packages:
+#    pip install -r requirements.txt
+#    pip install polygon-api-client pandas
+
+# 2. Make sure you have a valid Polygon.io API key
+#    The script uses the API key: M563eKqwZduqpb0G5PUlaqpAKpoGnmVi
+#    You can replace it with your own API key in the script
+#
+# 3. Run the script:
+#    python scripts/polygon_options.py
+#    python scripts/fetch_options_flow.py
+#    python scripts/market_analysis.py
+#    python scripts/run_gamma_processing.py
+# The script will:
+# - Fetch options flow data for the configured list of tickers
+# - Filter results based on:
+#   * Minimum premium threshold: $0
+#   * Minimum volume: 100
+#   * Minimum open interest: 100
+#   * Maximum days to expiration: 200
+# - Save results to: gflows-main/data/json/polygon_options_data.json
+# - Update every 5 minutes
+#
+# Note: The script runs indefinitely until stopped. Use Ctrl+C to stop the script.
